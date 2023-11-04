@@ -6,8 +6,8 @@
  * @Module Function:
  *
  * @Current Version: 1.2
- * @Author: 吕英勤
- * @Modifier: 吕英勤
+ * @Author: Lyuyk
+ * @Modifier: Lyuyk
  * @Finished Date: 2023/3/3
  *
  * @Version History: 1.1
@@ -49,11 +49,20 @@ private slots:
 
     void on_pushButton_clearConsole_clicked();
 
+    void on_pushButton_Lexer_clicked();
+
 private:
+    void printConsole(QString str);
+
+private:    
     Ui::MainWindow *ui;
 
     QString regexStr;//正则表达式字符串
+    QString keywordStr;//关键字字符串
+    QString srcFilePath;//源程序路径
+    QString tmpFilePath;//
 
-    NDFA NDFAG;
+    NDFA NDFAG;//FA自动机类
+
 };
 #endif // MAINWINDOW_H

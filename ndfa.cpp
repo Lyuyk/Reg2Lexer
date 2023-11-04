@@ -1,526 +1,601 @@
+/****************************************************
+ * @Copyright © 2021-2023 Lyuyk. All rights reserved.
+ *
+ * @FileName: ndfa.cpp
+ * @Brief: NFA、DFA类源文件
+ * @Module Function:
+ *
+ * @Current Version: 1.3
+ * @Author: Lyuyk
+ * @Modifier: Lyuyk
+ * @Finished Date: 2023/4/21
+ *
+ * @Version History: 1.1
+ *                   1.2 增添了部分注释，提高了部分代码的可读性
+ *                   1.3 current version
+ *
+ ****************************************************/
 #include "ndfa.h"
 #include <QDebug>
 
 NDFA::NDFA()
 {
-    NFAStateNum=0;//状态创建计数
-    DFAStateNum=0;
-    mDFAStateNum=0;
-    OpCharSet.clear();
-    dividedSet->clear();
-
-    NFAG.startNode=NULL;
-    NFAG.endNode=NULL;
-    DFAG.endCharSet.clear();
-    DFAG.endStates.clear();
-    mDFAG.endCharSet.clear();
-    mDFAG.endStates.clear();
-
-    for(int i=0;i<ARR_MAX_NUM;i++)
-    {
-        NFAStateArr[i].stateNum=i;
-        NFAStateArr[i].val='#';
-        NFAStateArr[i].tState=-1;
-        NFAStateArr[i].eSUnion.clear();
-    }
-    for(int i=0;i<ARR_MAX_NUM;i++)
-    {
-        DFAStateArr[i].stateNum=i;
-        DFAStateArr[i].isEnd=false;
-        DFAStateArr[i].edgeCount=0;
-        DFAStateArr[i].em_closure_NFA.clear();
-
-        for(int j=0;j<DFA_NODE_EDGE_COUNT;j++)
-        {
-            DFAStateArr[i].edges[j].input='#';
-            DFAStateArr[i].edges[j].tgtState=-1;
-        }
-    }
-    for(int i=0;i<ARR_MAX_NUM;i++)
-    {
-        mDFANodeArr[i].stateNum=i;
-        mDFANodeArr[i].isEnd=false;
-        mDFANodeArr[i].edgeCount=0;
-        mDFANodeArr[i].em_closure_NFA.clear();
-
-        for(int j=0;j<DFA_NODE_EDGE_COUNT;j++)
-        {
-            mDFANodeArr[i].edges[j].input='#';
-            mDFANodeArr[i].edges[j].tgtState=-1;
-        }
-    }
+    init();
 }
 
+/**
+ * @brief NDFA::init
+ * 类初始化函数
+ */
 void NDFA::init()
 {
-    NFAStateNum=0;//状态创建计数
-    DFAStateNum=0;
-    mDFAStateNum=0;
-    OpCharSet.clear();
-    dividedSet->clear();
+    //初始化FA状态计数
+    m_NFAStateNum=0;
+    m_DFAStateNum=0;
+    m_mDFAStateNum=0;
+    m_opCharSet.clear();
+    m_DFAEndStateSet.clear();
+    m_keyWordSet.clear();
+    m_reg_keyword_str.clear();
+    m_lexerCodeStr.clear();
+    m_dividedSet->clear();
 
-    NFAG.startNode=NULL;
-    NFAG.endNode=NULL;
-    DFAG.endCharSet.clear();
-    DFAG.endStates.clear();
-    mDFAG.endCharSet.clear();
-    mDFAG.endStates.clear();
+    //FA图初始化
+    m_NFAG.startNode=NULL;
+    m_NFAG.endNode=NULL;
+    m_mDFAG.startState=-1;
+    m_mDFAG.endStateSet.clear();
 
-    for(int i=0;i< ARR_MAX_NUM;i++)
+    //NFA节点数组初始化
+    for(int i=0;i<ARR_MAX_SIZE;i++)
     {
-        NFAStateArr[i].stateNum=i;
-        NFAStateArr[i].val='#';
-        NFAStateArr[i].tState=-1;
-        NFAStateArr[i].eSUnion.clear();
+        m_NFAStateArr[i].init();
+        m_NFAStateArr[i].stateNum=i;
     }
-    for(int i=0;i<ARR_MAX_NUM;i++)
-    {
-        DFAStateArr[i].stateNum=i;
-        DFAStateArr[i].isEnd=false;
-        DFAStateArr[i].edgeCount=0;
-        DFAStateArr[i].em_closure_NFA.clear();
 
-        for(int j=0;j<DFA_NODE_EDGE_COUNT;j++)
-        {
-            DFAStateArr[i].edges[j].input='#';
-            DFAStateArr[i].edges[j].tgtState=-1;
-        }
+    //DFA节点数组初始化
+    for(int i=0;i<ARR_MAX_SIZE;i++)
+    {
+        m_DFAStateArr[i].init();
+        m_DFAStateArr[i].stateNum=i;
     }
-    for(int i=0;i<ARR_MAX_NUM;i++)
-    {
-        mDFANodeArr[i].stateNum=i;
-        mDFANodeArr[i].isEnd=false;
-        mDFANodeArr[i].edgeCount=0;
-        mDFANodeArr[i].em_closure_NFA.clear();
 
-        for(int j=0;j<DFA_NODE_EDGE_COUNT;j++)
-        {
-            mDFANodeArr[i].edges[j].input='#';
-            mDFANodeArr[i].edges[j].tgtState=-1;
-        }
+    //mDFA节点数组初始化优化
+    for(int i=0;i<ARR_MAX_SIZE;i++)
+    {
+        m_mDFANodeArr[i].init();
     }
 }
 
 void NDFA::printNFA(QTableWidget *table)
 {
-    int rowCount=NFAStateNum;//记录NFA状态数
-    int epsColN=OpCharSet.size()+1;//最后一列 epsilon 列号
-    int colCount=OpCharSet.size()+3;
-    QStringList OpStrList=OpCharSet.values();
-    std::sort(OpStrList.begin(),OpStrList.end());
-    OpStrList.push_front("状态号");
-    OpStrList.push_back("epsilon");
-    OpStrList.push_back("初/终态");
+    int epsColN=m_opCharSet.size()+1;//最后一列 epsilon 列号
 
-    //ui->plainTextEdit_console->insertPlainText("NFA states' count:"+QString::number(NFAStateNum)+'\n');
-    //ui->plainTextEdit_console->insertPlainText("Operators' count:"+QString::number(OpCharSet.size())+'\n');
+    //初始化表头
+    QStringList headerStrList=m_opCharSet.values();
+    headerStrList.push_front("状态号");
+    headerStrList.push_back("epsilon");
+    headerStrList.push_back("初/终态");
 
-    qDebug()<<OpStrList;
-    table->setRowCount(rowCount);
-    table->setColumnCount(colCount);
-    /*设置表头 行*/
-    table->setHorizontalHeaderLabels(OpStrList);
-    /*设置表头 列*/
-    for(int row=0;row<rowCount;row++)
+    table->setRowCount(m_NFAStateNum);
+    table->setColumnCount(m_opCharSet.size()+3);
+    //设置表头 行
+    table->setHorizontalHeaderLabels(headerStrList);
+    //竖轴隐藏
+    table->verticalHeader()->setHidden(true);
+    table->setAlternatingRowColors(true);//隔行变色
+    table->setPalette(QPalette(qRgb(240,240,240)));
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);//自动调整列宽
+
+
+    for(int state=0;state<m_NFAStateNum;state++)
     {
-        //状态号
-        table->setItem(row,0,new QTableWidgetItem(i2cMap[row]));
-        //epsilon转换集合
-        QString epsSetStr="";
-        QSet<int>::iterator it;
-        for(it=NFAStateArr[row].eSUnion.begin();it!=NFAStateArr[row].eSUnion.end();it++)
-        {
-            epsSetStr+=QString::number(*it)+",";
-        }
-        table->setItem(row,epsColN,new QTableWidgetItem(epsSetStr));
-        qDebug()<<"NFAStateArr[row].eSUnion:"<<NFAStateArr[row].eSUnion;
-        qDebug()<<"eps"+epsSetStr;
+        table->setItem(state,0,
+                       new QTableWidgetItem(QString::number(state)));
+        table->item(state,0)->setTextAlignment(Qt::AlignCenter);//居中
 
-        //非epsilon转换
-        int colN=OpStrList.indexOf(NFAStateArr[row].val);
-        //qDebug()<<colN;
-        if(colN != -1)
+        int k=1;
+        int colN=1;
+
+        for(;k<headerStrList.size()-2;k++)
         {
-            table->setItem(row,colN,new QTableWidgetItem(QString::number(NFAStateArr[row].tState)));
+            if(m_NFAStateArr[state].value==headerStrList[k])
+            {
+                table->setItem(state,colN,
+                               new QTableWidgetItem(
+                                   QString::number(m_NFAStateArr[state].toState)));
+                table->item(state,colN)->setTextAlignment(Qt::AlignCenter);//居中
+            }
+            colN++;
         }
 
-        if(NFAStateArr[row].stateNum==NFAG.startNode->stateNum)
+        QString epsStr="";
+        //qDebug()<<NFAStateArr[state].epsToSet;
+        for(const auto &e_state: m_NFAStateArr[state].epsToSet)
         {
-            table->setItem(row,epsColN+1,new QTableWidgetItem("初态"));
+            epsStr+=QString::number(e_state)+",";
         }
+        epsStr.chop(1);
+        table->setItem(state,epsColN,new QTableWidgetItem(epsStr));
+        table->item(state,epsColN)->setTextAlignment(Qt::AlignCenter);//居中
 
-        if(NFAStateArr[row].stateNum==NFAG.endNode->stateNum)
-        {
-            table->setItem(row,epsColN+1,new QTableWidgetItem("终态"));
+        if(m_NFAStateArr[state].stateNum==m_NFAG.startNode->stateNum)
+        {//若为初态
+            table->setItem(state,epsColN+1,new QTableWidgetItem("初态"));
+            table->item(state,epsColN+1)->setTextAlignment(Qt::AlignCenter);//居中
         }
-
-
-        //控制台输出
-        //ui->plainTextEdit_console->insertPlainText(QString::number(row)+'\n');
+        if(m_NFAStateArr[state].stateNum==m_NFAG.endNode->stateNum)
+        {//若为终态
+            table->setItem(state,epsColN+1,new QTableWidgetItem("终态"));
+            table->item(state,epsColN+1)->setTextAlignment(Qt::AlignCenter);//居中
+        }
     }
 }
 
 void NDFA::printDFA(QTableWidget *table)
 {
-    QStringList OpStrList=OpCharSet.values();
-    std::sort(OpStrList.begin(),OpStrList.end());
-    OpStrList.push_front("状态号");
-    OpStrList.push_back("初/终态");
+    //初始化
+    table->clear();table->setRowCount(0);table->setColumnCount(0);
 
-    int rowCount=DFAStateNum;
-    int colCount=OpStrList.size();
-    //设置表格行列
-    table->setColumnCount(colCount);
-    table->setRowCount(rowCount);
+    table->setRowCount(m_DFAStateNum);//表格行数
+    table->setColumnCount(m_opCharSet.count()+3);//表格列数（状态号，包含NFA状态，操作符。。。，初/终态）
+    table->verticalHeader()->setHidden(true);//隐藏竖轴序号列
+    table->setAlternatingRowColors(true);//隔行变色
+    table->setPalette(QPalette(qRgb(240,240,240)));
 
+
+    //表头初始化
+    QStringList headerStrList=m_opCharSet.values();
+    headerStrList.push_front("包含的NFA状态");
+    headerStrList.push_front("状态号");
+    headerStrList.push_back("初/终态");
     //水平表头
-    table->setHorizontalHeaderLabels(OpStrList);
-    table->setItem(DFAG.startState,colCount-1,new QTableWidgetItem("初态"));
+    table->setHorizontalHeaderLabels(headerStrList);
 
-    for(int iArr=0;iArr<DFAStateNum;iArr++)
+    //遍历所有DFA节点
+    for(int state=0;state<m_DFAStateNum;state++)
     {
-        int rowN=DFAStateArr[iArr].stateNum;
-        table->setItem(rowN,0,new QTableWidgetItem(QString::number(rowN)));
-        //遍历DFA节点出边
-        for(int i=0;i<DFAStateArr[rowN].edgeCount;i++)
+        //设置状态号
+        table->setItem(state,0,
+                       new QTableWidgetItem(QString::number(m_DFAStateArr[state].stateNum)));
+        table->item(state,0)->setTextAlignment(Qt::AlignCenter);//居中
+        //NFA状态集
+        QString NFASetStr="{ ";
+        for(const auto &n_state:m_DFAStateArr[state].NFANodeSet)
         {
-            //转到状态的列标
-            int colN=OpStrList.indexOf(DFAStateArr[rowN].edges[i].input);
-            int toStateN=DFAStateArr[rowN].edges[i].tgtState;
-            table->setItem(rowN,colN,new QTableWidgetItem(QString::number(toStateN)));
+            NFASetStr+=QString::number(n_state)+",";
+        }
+        NFASetStr.replace(NFASetStr.size()-1,1," }");
+        table->setItem(state,1,new QTableWidgetItem(NFASetStr));
+
+        int k=2;//从第一个操作符开始
+        int colN=2;//第三列开始显示
+        for(;k<headerStrList.count()-1;k++)
+        {
+            QString curOpChar=headerStrList[k];//当前操作符
+
+            if(m_DFAStateArr[state].DFAEdgeMap.contains(curOpChar))//若可达
+            {
+                //可以去到的状态号
+                int toState=m_DFAStateArr[state].DFAEdgeMap[curOpChar];
+
+//                QString n_NFASetStr=QString::number(toState)+" { ";
+//                for(const auto &n_state:m_DFAStateArr[toState].NFANodeSet)//可去到的状态集
+//                {
+//                    n_NFASetStr+=QString::number(n_state)+",";
+//                }
+//                n_NFASetStr.replace(n_NFASetStr.size()-1,1," }");
+                //状态多起来显示集合很麻烦
+                table->setItem(state,colN,new QTableWidgetItem(QString::number(toState)));
+                table->item(state,colN)->setTextAlignment(Qt::AlignCenter);//居中
+            }
+            colN++;
         }
 
-        if(DFAStateArr[rowN].isEnd)
-        {
-            table->setItem(rowN,colCount-1,new QTableWidgetItem("终态"));
+        if(m_DFAEndStateSet.contains(state))
+        {//若为终态
+            table->setItem(state,colN,new QTableWidgetItem("终态"));
+            table->item(state,colN)->setTextAlignment(Qt::AlignCenter);//居中
         }
-
+        else if(m_DFAStateArr[state].NFANodeSet.contains(m_NFAG.startNode->stateNum))
+        {
+            table->setItem(state,colN,new QTableWidgetItem("初态"));
+            table->item(state,colN)->setTextAlignment(Qt::AlignCenter);//居中
+        }
     }
+    table->resizeRowsToContents();//自适应行高
 }
 
 void NDFA::printMDFA(QTableWidget *table)
 {
-    QStringList OpStrList=OpCharSet.values();
-    std::sort(OpStrList.begin(),OpStrList.end());
-    //OpStrList.push_front("状态集元素");
-    OpStrList.push_front("状态集号");
-    OpStrList.push_back("初/终态");
+    //初始化
+    table->clear();table->setRowCount(0);table->setColumnCount(0);
 
-    int rowCount=mDFAStateNum;
-    int colCount=OpStrList.size();
-    //设置表格行列
-    table->setColumnCount(colCount);
-    table->setRowCount(rowCount);
-    //设置表头
-    table->setHorizontalHeaderLabels(OpStrList);
+    table->setRowCount(m_mDFAStateNum);//表格行数
+    table->setColumnCount(m_opCharSet.count()+2);//表格列数
+    table->verticalHeader()->setHidden(true);//隐藏竖轴序号列
+    table->setAlternatingRowColors(true);//隔行变色
+    table->setPalette(QPalette(qRgb(240,240,240)));
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);//自动调整列宽
 
-    //输出表格内容
-    table->setHorizontalHeaderLabels(OpStrList);
-    table->setItem(mDFAG.startState,colCount-1,new QTableWidgetItem("初态"));
+    //表头初始化
+    QStringList headerStrList=m_opCharSet.values();
+    headerStrList.push_front("状态号");
+    headerStrList.push_back("初/终态");
+    //设置水平表头
+    table->setHorizontalHeaderLabels(headerStrList);
 
-    qDebug()<<"mDS:"<<mDFAStateNum;
-    for(int iArr=0;iArr<mDFAStateNum;iArr++)
+    for(int stateId=0;stateId<m_mDFAStateNum;stateId++)
     {
-        int rowN=mDFANodeArr[iArr].stateNum;
+        int k=1;//第一个状态开始
+        int colN=1;
 
-        table->setItem(rowN,0,new QTableWidgetItem(QString::number(rowN)));
+        table->setItem(stateId, 0,
+                       new QTableWidgetItem(QString::number(stateId)));//列 状态号
+        table->item(stateId,0)->setTextAlignment(Qt::AlignCenter);
 
-        //遍历DFA节点出边
-        for(int i=0;i<mDFANodeArr[rowN].edgeCount;i++)
+        //遍历所有操作符
+        for( ;k<headerStrList.count()-1;k++)
         {
-            //转到状态的列标
-            int colN=OpStrList.indexOf(mDFANodeArr[rowN].edges[i].input);
-            qDebug()<<"colN"<<colN;
-            int toStateN=mDFANodeArr[rowN].edges[i].tgtState;
-            table->setItem(rowN,colN,new QTableWidgetItem(QString::number(toStateN)));
-        }
-
-        if(mDFANodeArr[rowN].isEnd)
-        {
-            table->setItem(rowN,colCount-1,new QTableWidgetItem("终态"));
-        }
-    }
-}
-
-void NDFA::insert(QString &s, int n, QChar ch)
-{
-    s += '#';
-
-    for(int i = s.size() - 1; i > n; i--)
-    {
-        s[i] = s[i - 1];
-    }
-
-    s[n] = ch;
-}
-
-QString NDFA::preProcess(QString &s)
-{
-    int i = 0 , length = s.size();
-
-    while(i < length)
-    {
-        if((s.at(i) >= 'a' && s.at(i) <= 'z') || (s.at(i) == '*') || (s.at(i) == ')'))
-        {
-            if((s[i + 1] >= 'a' && s[i + 1] <= 'z') || s[i + 1] == '(')
+            QString curOpChar=headerStrList[k];//当前操作符
+            if(m_mDFANodeArr[stateId].mDFAEdgesMap.contains(curOpChar))
             {
+                //若通过当前操作符可达
+                int toIdx=m_mDFANodeArr[stateId].mDFAEdgesMap[curOpChar];
 
-                insert(s, i+1 , '&');
-                length ++;
+                table->setItem(stateId,colN,new QTableWidgetItem(QString::number(toIdx)));
+                table->item(stateId,colN)->setTextAlignment(Qt::AlignCenter);//居中
             }
+            colN++;
         }
 
-        i++;
-    }
-}
-
-NDFA::NFAGraph NDFA::createNFA(int sum)
-{
-
-}
-
-int NDFA::priority(QChar ch)
-{
-
-    if(ch == '*')
-    {
-        return 3;
-    }
-
-    if(ch == '?')
-    {
-        return 3;
-    }
-
-    if(ch == '+')
-    {
-        return 3;
-    }
-
-    if(ch == '&')
-    {
-        return 2;
-    }
-
-    if(ch == '|')
-    {
-        return 1;
-    }
-
-    if(ch == '(')
-    {
-        return 0;
-    }
-
-    return -1;
-}
-
-QString NDFA::in2Suffix(QString s)
-{
-    preProcess(s);			/*对字符串进行预处理*/
-
-    QString str;				/*要输出的后缀字符串*/
-    QStack<QChar> oper;		/*运算符栈*/
-
-    for(int i = 0; i < s.size(); i++)
-    {
-        //操作数不处理
-        if(s.at(i) >= 'a' && s.at(i) <= 'z')
+        if(m_mDFAG.endStateSet.contains(stateId))
         {
-            str += s.at(i);
+            //若为初态
+            table->setItem(stateId,colN,
+                           new QTableWidgetItem("终态"));
+            table->item(stateId,colN)->setTextAlignment(Qt::AlignCenter);//居中
         }
-        else							/*遇到运算符时*/
+        else if(stateId==m_mDFAG.startState)
         {
-
-            if(s.at(i) == '(')			/*遇到左括号压入栈中*/
-            {
-                oper.push(s.at(i));
-            }
-
-            else if(s.at(i) == ')')	/*遇到右括号时*/
-            {
-
-                QChar ch = oper.top();
-                while(ch != '(')		/*将栈中元素出栈，直到栈顶为左括号*/
-                {
-
-                    str += ch;
-
-                    oper.pop();
-                    ch = oper.top();
-                }
-
-                oper.pop();				/*最后将左括号出栈*/
-            }
-            else					/*遇到其他操作符时*/
-            {
-                if(!oper.empty())			/*如果栈不为空*/
-                {
-
-                    QChar ch = oper.top();
-                    while(priority(ch) >= priority(s.at(i)))	/*弹出栈中优先级大于等于当前运算符的运算符*/
-                    {
-
-                        str +=	ch;
-                        oper.pop();
-
-                        if(oper.empty())	/*如果栈为空则结束循环*/
-                        {
-                            break;
-                        }
-                        else ch = oper.top();
-                    }
-
-                    oper.push(s.at(i));		/*再将当前运算符入栈*/
-                }
-
-                else				/*如果栈为空，直接将运算符入栈*/
-                {
-                    oper.push(s.at(i));
-                }
-            }
+            //若为终态
+            table->setItem(stateId,colN,
+                           new QTableWidgetItem("初态"));
+            table->item(stateId,colN)->setTextAlignment(Qt::AlignCenter);//居中
         }
     }
-
-    /*最后如果栈不为空，则出栈并输出到字符串*/
-    while(!oper.empty())
-    {
-
-        QChar ch = oper.top();
-        oper.pop();
-
-        str += ch;
-    }
-
-//    ui->plainTextEdit_console->insertPlainText("infix regex(origin):"+s+'\n');
-//    ui->plainTextEdit_console->insertPlainText("suffix(processed):"+str+'\n');
-
-    return str;
 }
 
+void NDFA::printLexer(QPlainTextEdit *widget)
+{
+    widget->clear();
+    widget->setPlainText(m_lexerCodeStr);
+}
+
+/**
+ * @brief NDFA::strToNfa
+ * 将正则表达式转换为NFA
+ * @param s
+ * @return
+ */
 NDFA::NFAGraph NDFA::strToNfa(QString s)
 {
-    //存NFA的栈
-    QStack<NFAGraph> NfaStack;
+    opPriorityMapInit();//运算符优先级初始化
 
-    for(int i = 0; i < s.size(); i++)
+    QStack<NFAGraph> NFAStack;//存NFA子图的栈
+    QStack<QChar> opStack;//符号栈
+
+    for(int i=0;i<s.size();i++)
     {
-        //操作数的处理
-        if(s.at(i) >= 'a' && s.at(i) <= 'z')
+        switch(s[i].unicode())
         {
-            OpCharSet.insert(s.at(i));
-            NFAGraph n = createNFA(NFAStateNum);
-            NFAStateNum += 2;//开始与结束节点
-            //NFA的头指向尾，弧上的值为s.at(i)
-            add(n.startNode, n.endNode, s.at(i));
-
-            NfaStack.push(n);
+        case '|':
+        case '&':
+        {
+            pushOpStackProcess(s[i],opStack,NFAStack);
+            break;
         }
-        else if(s.at(i) == '*')		//闭包运算处理
+        case '*':
+        case '+':
+        case '?':
         {
-
-            NFAGraph n1 = createNFA(NFAStateNum);
-            NFAStateNum += 2;
-
-            NFAGraph n2 = NfaStack.top();
-            NfaStack.pop();
-
-            add(n2.endNode, n2.startNode);
-            add(n2.endNode, n1.endNode);
-            add(n1.startNode, n2.startNode);
-            add(n1.startNode, n1.endNode);
-
-            //新NFA入栈
-            NfaStack.push(n1);
+            pushOpStackProcess(s[i],opStack,NFAStack);
+            insConnOp(s,i,opStack,NFAStack);
+            break;
         }
-        else if(s.at(i) == '+')//正闭包的处理
+        case '(': opStack.push('(');break;
+        case ')':
         {
-
-            NFAGraph n1 = createNFA(NFAStateNum);
-            NFAStateNum += 2;
-
-            NFAGraph n2 = NfaStack.top();
-            NfaStack.pop();
-
-            add(n2.endNode, n2.startNode);
-            add(n2.endNode, n1.endNode);
-            add(n1.startNode, n2.startNode);
-            //与*相比只少了一条从n1.startNode->n1.endNode的epsilon边
-            NfaStack.push(n1);
+            while(!opStack.empty())
+            {
+                if(opStack.top() != '(')
+                {
+                    opProcess(opStack.top(),NFAStack);
+                    opStack.pop();
+                }
+                else break;
+            }
+            opStack.pop();
+            insConnOp(s,i,opStack,NFAStack);
+            break;
         }
-        else if(s.at(i) == '?')//可选运算符的处理
+        default:
         {
+            //查看是否为转义字符
+            QString tmpStr;
+            if(s[i]=='\\')
+            {
+                while(s[++i]!='\\')
+                {
+                    if(s[i]=='`')i++;//转义的转义字符，因MiniC中注释符号有反斜杠'\'，用于区分
+                    tmpStr+=s[i];
+                }
+                m_opCharSet.insert(tmpStr);//顺便加入操作符集合
+                qDebug()<<tmpStr;
+            }
+            else {
+                tmpStr=s[i];
 
-            NFAGraph n1 = createNFA(NFAStateNum);
-            NFAStateNum += 2;
+                if(!m_opSet.contains(s[i]))
+                {
+                    m_opCharSet.insert(QString(s[i]));//若是转义字符顺便加入操作符集合
+                    qDebug()<<tmpStr;
+                }
+            }
 
-            NFAGraph n2 = NfaStack.top();
-            NfaStack.pop();
+            NFAGraph n=createNFA(m_NFAStateNum);
+            m_NFAStateNum+=2;
+            //生成NFA子图，加非eps边
+            add(n.startNode,n.endNode,tmpStr);
 
-            add(n2.endNode, n1.endNode);
-            add(n1.startNode, n2.startNode);
-            add(n1.startNode, n1.endNode);
-
-            NfaStack.push(n1);
+            NFAStack.push(n);
+            insConnOp(s,i,opStack,NFAStack);
         }
-        else if(s.at(i) == '|')		/*遇到或运算符*/
-        {
-
-            NFAGraph n1, n2;							/*从栈中弹出两个NFA，栈顶为n2，次栈顶为n1*/
-            n2 = NfaStack.top();
-            NfaStack.pop();
-
-            n1 = NfaStack.top();
-            NfaStack.pop();
-
-            NFAGraph n = createNFA(NFAStateNum);
-            NFAStateNum +=2;
-
-            add(n.startNode, n1.startNode);
-            add(n.startNode, n2.startNode);
-            add(n1.endNode, n.endNode);
-            add(n2.endNode, n.endNode);
-
-            NfaStack.push(n);					/*最后将新生成的NFA入栈*/
-        }
-        else if(s.at(i) == '&')//连接运算的处理
-        {
-
-            NFAGraph n1, n2, n;
-
-            n2 = NfaStack.top();
-            NfaStack.pop();
-
-            n1 = NfaStack.top();
-            NfaStack.pop();
-
-            add(n1.endNode, n2.startNode);
-
-            n.startNode = n1.startNode;
-            n.endNode = n2.endNode;
-
-            NfaStack.push(n);
         }
     }
-    return NfaStack.top();
+    //读完字符串，运算符站还有元素则将其全部出栈
+    while(!opStack.empty())
+        opProcess(opStack.pop(),NFAStack);
+
+    return NFAStack.top();
 }
 
-NDFA::NFAGraph NDFA::createNFA(QChar start,QChar end)
+/**
+ * @brief NDFA::opPriorityMapInit
+ * 初始化操作符优先级，数值越高优先级越大
+ */
+void NDFA::opPriorityMapInit()
+{
+    opPriorityMap['(']=0;
+    opPriorityMap['|']=1;
+    opPriorityMap['&']=2;
+    opPriorityMap['*']=3;
+    opPriorityMap['+']=3;
+    opPriorityMap['?']=3;
+}
+
+void NDFA::insConnOp(QString str, int curState, QStack<QChar> &opStack, QStack<NFAGraph> &NFAStack)
+{
+    //判断是否两元素间加入连接符号，即栈中是否需要加入连接符号
+    if(curState+1<str.size() && (!m_opSet.contains(str[curState+1]) || str[curState+1]=='('))
+    {
+        pushOpStackProcess('&',opStack,NFAStack);
+    }
+}
+
+void NDFA::pushOpStackProcess(QChar opCh, QStack<QChar> &opStack, QStack<NFAGraph> &NFAStack)
+{
+    while(!opStack.empty())
+    {
+        //若栈顶运算符优先级大于当前将进栈元素，则将栈顶元素出栈并处理，再继续循环判断
+        if(opStack.top()!='(' && opPriorityMap[opStack.top()]>=opPriorityMap[opCh])
+        {
+            opProcess(opStack.top(),NFAStack);
+            opStack.pop();
+        }
+        else break;
+    }
+    opStack.push(opCh);
+}
+
+/**
+ * @brief NDFA::opCharProcess
+ * @param opChar
+ * @param NFAStack
+ * 根据运算符转换NFA处理子函数
+ */
+void NDFA::opProcess(QChar opChar, QStack<NFAGraph> &NFAStack)
+{
+    switch(opChar.unicode())
+    {
+    case '|':
+    {
+        //或运算处理
+        NFAGraph n1=NFAStack.pop();//先出n1
+        NFAGraph n2=NFAStack.pop();//后出n2
+        NFAGraph n=createNFA(m_NFAStateNum);
+        m_NFAStateNum+=2;
+
+        add(n.startNode,n2.startNode);
+        add(n.startNode,n1.startNode);
+        add(n2.endNode,n.endNode);
+        add(n1.endNode,n.endNode);
+        NFAStack.push(n);
+
+        break;
+    }
+    case '&':
+    {
+        //与运算处理
+        NFAGraph n1=NFAStack.pop();
+        NFAGraph n2=NFAStack.pop();
+
+        add(n2.endNode,n1.startNode);
+
+        NFAGraph n;
+        n.startNode=n2.startNode;
+        n.endNode=n1.endNode;
+
+        NFAStack.push(n);
+        break;
+    }
+    case '*':
+    {
+        //闭包运算处理
+        NFAGraph n1=NFAStack.pop();
+        NFAGraph n=createNFA(m_NFAStateNum);
+        m_NFAStateNum+=2;
+
+        add(n.startNode,n.endNode);
+        add(n.startNode,n1.startNode);
+        add(n1.endNode,n1.startNode);
+        add(n1.endNode,n.endNode);
+
+        NFAStack.push(n);
+        break;
+    }
+    case '+':
+    {
+        //正闭包运算处理
+        NFANode *newEndNode=&m_NFAStateArr[m_NFAStateNum];
+        m_NFAStateNum++;
+
+        NFAGraph n1=NFAStack.pop();
+        add(n1.endNode,newEndNode);
+        add(n1.endNode,n1.startNode);
+
+        NFAGraph n;
+        n.startNode=n1.startNode;
+        n.endNode=newEndNode;
+
+        NFAStack.push(n);
+        break;
+    }
+    case '?':
+    {
+        NFANode *newStartNode=&m_NFAStateArr[m_NFAStateNum];
+        m_NFAStateNum++;
+
+        NFAGraph n1=NFAStack.pop();
+        add(newStartNode,n1.startNode);
+        add(newStartNode,n1.endNode);
+
+        NFAGraph n;
+        n.startNode=newStartNode;
+        n.endNode=n1.endNode;
+
+        NFAStack.push(n);
+        break;
+    }
+    }
+}
+
+/**
+ * @brief NDFA::get_e_closure
+ * @param tmpSet
+ * 求epsilon闭包
+ */
+void NDFA::get_e_closure(QSet<int> &tmpSet)
+{
+    QQueue<int> q;
+    for(const auto &value: tmpSet)
+        q.push_back(value);
+
+    while(!q.empty())
+    {
+        int tmpFront=q.front();
+        q.pop_front();
+
+        QSet<int> eTmpSet=m_NFAStateArr[tmpFront].epsToSet;
+        //将通过epsilon到达的节点序号放入集合中
+        for(const auto &value: eTmpSet)
+        {
+            if(!tmpSet.contains(value))
+            {
+                tmpSet.insert(value);
+                q.push_back(value);
+            }
+        }
+    }
+}
+
+/**
+ * @brief NDFA::getStateId
+ * @param set
+ * @param cur
+ * @return i
+ * 查询当前DFA节点号cur属于mDFA节点的状态集号
+ */
+int NDFA::getStateId(QSet<int> set[], int cur)
+{
+    for(int i=0;i<m_mDFAStateNum;i++)
+    {
+        if(set[i].contains(cur))
+            return i;
+    }
+}
+
+/**
+ * @brief NDFA::genLexCase
+ * @param tmpList
+ * @param codeStr
+ * @param idx
+ * @param flag
+ * @return
+ *生成Lexer代码的核心子函数
+ */
+bool NDFA::genLexCase(QList<QString> tmpList, QString &codeStr, int idx, bool flag)
+{
+    bool rFlag=false;
+    for(int i=0;i<tmpList.size();i++)
+    {
+        QString tmpKey=tmpList[i];
+        //字母情况
+        if(tmpKey=="letter")
+        {
+            for(int j=0;j<26;j++)
+            {
+                codeStr+="\t\t\tcase \'"+QString(char('a'+j))+"\':\n";
+                codeStr+="\t\t\tcase \'"+QString(char('A'+j))+"\':\n";
+            }
+            codeStr.chop(1);//去掉末尾字符
+            if(flag)codeStr+="isIdentifier = true; ";
+        }
+        else if(tmpKey=="digit")
+        {
+            //数字情况
+            for(int j=0;j<10;j++)
+            {
+                codeStr+="\t\t\tcase \'"+QString::number(j)+"\':\n";
+            }
+            codeStr.chop(1);
+            if(flag)codeStr+="isDigit = true; ";
+        }
+        else if(tmpKey=="~")
+        {
+            rFlag=true;
+            continue;
+        }
+        else codeStr+="\t\t\tcase \'"+tmpKey+"\':";
+
+        if(flag)codeStr+="state = "+QString::number(m_mDFANodeArr[idx].mDFAEdgesMap[tmpKey])+"; ";
+        codeStr+="break;\n";
+    }
+    return rFlag;
+}
+
+/**
+ * @brief NDFA::createNFA
+ * @param stateN
+ * @return n
+ * 建立一个初始化的NFA子图，包含开始和结尾两NFA节点
+ */
+NDFA::NFAGraph NDFA::createNFA(int stateN)
 {
     NFAGraph n;
 
-    n.startNode = &NFAStateArr[c2iMap[start]];
-    n.endNode = &NFAStateArr[c2iMap[end]];
-
-    return n;
-}
-
-NDFA::NFAGraph NDFA::createNFA(int start, int end)
-{
-    NFAGraph n;
-
-    n.startNode = &NFAStateArr[start];
-    n.endNode = &NFAStateArr[end];
+    n.startNode=&m_NFAStateArr[stateN];
+    n.endNode=&m_NFAStateArr[stateN+1];
 
     return n;
 }
@@ -531,11 +606,12 @@ NDFA::NFAGraph NDFA::createNFA(int start, int end)
  * @param n2
  * @param ch
  * n1--ch-->n2
+ * NFA节点n1与n2间添加一条非epsilon边，操作符为ch
  */
-void NDFA::add(NDFA::NFANode *n1, NDFA::NFANode *n2, QChar ch)
+void NDFA::add(NDFA::NFANode *n1, NDFA::NFANode *n2, QString ch)
 {
-    n1->val = ch;
-    n1->tState = n2->stateNum;
+    n1->value = ch;
+    n1->toState = n2->stateNum;
 }
 
 /**
@@ -543,171 +619,87 @@ void NDFA::add(NDFA::NFANode *n1, NDFA::NFANode *n2, QChar ch)
  * @param n1
  * @param n2
  * n1--eps->n2
+ * NFA节点n1与n2间添加一条epsilon边，信息记录于n1节点中
  */
-void NDFA::add(NDFA::NFANode *n1, NDFA::NFANode *n2)
+void NDFA::add(NFANode *n1, NFANode *n2)
 {
-    n1->eSUnion.insert(n2->stateNum);
+    n1->epsToSet.insert(n2->stateNum);
+    //qDebug()<<"addEps:"<<n2->stateNum;
 }
 
 /**
- * @brief MainWindow::e_cloure
- *
- * @param s
- * @return
+ * @brief NDFA::reg2NFA
+ * @param regStr
+ * 将正则表达式转换为NFA的主函数
  */
-/**
- * @brief NDFA::e_closure
- * 求一个状态集的ε-cloure
- * @param s
- * @return
- */
-QSet<int> NDFA::e_closure(QSet<int> s)
+void NDFA::reg2NFA(QString regStr)
 {
-    QSet<int> newSet;
-    QStack<int> eStack;
-
-    for(const auto &iter:s)
-    {
-        newSet.insert(iter);
-        eStack.push(iter);
-    }
-
-    while(!eStack.isEmpty())
-    {
-        int OpTmp=eStack.top(); //从栈中弹出一个元素
-        eStack.pop();
-
-        for(const auto &iter : qAsConst(NFAStateArr[OpTmp].eSUnion))//遍历它能够通过epsilon转换到的状态集合
-        {
-            if(!newSet.contains(iter))/*若当前的元素没有在集合中出现，则将其加入集合中*/
-            {
-                newSet.insert(iter);
-                eStack.push(iter);//同时压入栈中
-            }
-        }
-    }
-    return newSet;//最后得到的集合即为ε-cloure
-}
-
-QSet<int> NDFA::move_e_cloure(QSet<int> s, QChar ch)
-{
-    QSet<int> sMoveSet;
-
-    QSet<int>::iterator it;
-    for(it=s.begin();it!=s.end();it++)//遍历当前集合s中的每一个元素
-    {
-        if(NFAStateArr[*it].val==ch)//若对应转换弧上的值与ch相同
-        {
-            sMoveSet.insert(NFAStateArr[*it].tState);
-        }
-    }
-
-    sMoveSet=e_closure(sMoveSet);//求该集合的epsilon闭包
-    return sMoveSet;
-}
-
-bool NDFA::isEnd(NDFA::NFAGraph n, QSet<int> s)
-{
-    QSet<int>::iterator it;
-    for(it = s.begin();it!=s.end();it++)/*遍历该状态所包含的NFA状态集*/
-    {
-        if(*it==n.endNode->stateNum)
-        {
-            return true;//如果包含NFA的终态，则该状态为终态，返回true
-        }
-    }
-    return false;
+    m_NFAG=strToNfa(regStr);//调用转换函数
 }
 
 /**
- * @brief MainWindow::findSetNum
- * 当前的划分总数为count，返回状态n所属于的状态集合标号i
- * @param count
- * @param n
- * @return i (-2 means error occured)
+ * @brief NDFA::NFA2DFA
+ * 将NFA转换为DFA的主函数
  */
-int NDFA::findSetNum(int count, int n)
-{
-    for(int i=0;i<count;i++)
-    {
-        if(dividedSet[i].contains(n))
-        {
-            return i;
-        }
-    }
-    return -2;
-}
-
 void NDFA::NFA2DFA()
-{
-    QSet<QSet<int>> EStatesSet;
-
-    memset(DFAG.tranArr,-1,sizeof(DFAG.tranArr));
-
-    QSet<QString>::iterator t;
-    for(t=OpCharSet.begin();t!=OpCharSet.end();t++)
-    {
-        if(t->at(0).toLatin1()>='a' && t->at(0).toLatin1()<='z')//check***改全部字符
-        {
-            DFAG.endCharSet.insert(t->at(0).toLatin1());
-        }
-    }
-    qDebug()<<DFAG.endCharSet;
-    DFAG.startState=0;//DFA的初态为0
-
+{    
     QSet<int> tmpSet;
-    tmpSet.insert(NFAG.startNode->stateNum);
+    tmpSet.insert(m_NFAG.startNode->stateNum);//将NFA初态节点放入集合
+    get_e_closure(tmpSet);//求NFA初态节点的epsilon闭包得到DFA初态
+    m_DFAStateArr[m_DFAStateNum].NFANodeSet=tmpSet;//从初态开始
+    if(tmpSet.contains(m_NFAG.endNode->stateNum))
+        m_DFAEndStateSet.insert(m_DFAStateNum);
+    m_DFAStateNum++;
 
-    DFAStateArr[0].em_closure_NFA=e_closure(tmpSet);
-    DFAStateArr[0].isEnd=isEnd(NFAG, DFAStateArr[0].em_closure_NFA);
+    QSet<QSet<int>> DFAStatesSet;//存储DFA节点包含的序号
+    DFAStatesSet.insert(tmpSet);//将出台包含的序号集放入集合
+    QQueue<DFANode> q;
+    q.push_back(m_DFAStateArr[0]);//初态入队
 
-    DFAStateNum++;//DFA计数加一
-
-    QQueue<int> q;
-    q.push_back(DFAG.startState);//将DFA的初态存入队列中
-
-    while(!q.isEmpty())
+    while(!q.empty())
     {
-        int num=q.front();
-        q.pop_front();//pop掉队头元素
+        DFANode *t_DFANode=&q.front();//取出队列中一个DFA节点
+        q.pop_front();
 
-        QSet<QChar>::iterator it;
-        for(it=DFAG.endCharSet.begin();it!=DFAG.endCharSet.end();it++)
+        tmpSet=t_DFANode->NFANodeSet;//取出该DFA节点所包含的序号集
+        int t_curState=t_DFANode->stateNum;//记录当前DFA节点序号
+
+        //遍历操作符集
+        for(const auto &ch: m_opCharSet)
         {
-
-            QSet<int> tmpS=move_e_cloure(DFAStateArr[num].em_closure_NFA,*it);
-
-            if(!EStatesSet.contains(tmpS) && !tmpS.empty())
+            QSet<int> chToSet;//节点的（出边为ch）的集合
+            for(const auto &t_state: tmpSet)//遍历当前序号集合中的所有序号
             {
-                EStatesSet.insert(tmpS);
-
-                DFAStateArr[DFAStateNum].em_closure_NFA=tmpS;
-
-                DFAStateArr[num].edges[DFAStateArr[num].edgeCount].input=*it;
-                DFAStateArr[num].edges[DFAStateArr[num].edgeCount].tgtState=DFAStateNum;
-                DFAStateArr[num].edgeCount++;
-
-                DFAG.tranArr[num][it->toLatin1()-'a']=DFAStateNum;//更新状态转移矩阵
-
-                DFAStateArr[DFAStateNum].isEnd=isEnd(NFAG, DFAStateArr[DFAStateNum].em_closure_NFA);
-
-                q.push_back(DFAStateNum);//将新的状态号加入队列中
-
-                DFAStateNum++;//DFA总状态数加一
+                //找出所有这样的序号
+                if(m_NFAStateArr[t_state].value==ch)
+                    chToSet.insert(m_NFAStateArr[t_state].toState);
             }
-            else //求出的状态集合与之前求出的某个状态集合相同
+
+            if(chToSet.empty())//若找不到这样的节点，则说明该边需要被丢弃
+                continue;
+            get_e_closure(chToSet);//求上得的序号集合的epsilon闭包
+
+            if(!DFAStatesSet.contains(chToSet))
             {
-                for(int i=0;i<DFAStateNum;i++)
+                //若该DFA状态节点不存在
+                //新建DFA节点
+                m_DFAStateArr[m_DFAStateNum].NFANodeSet=chToSet;//chToSet--ch-->xxx
+                //若包含NFA终态
+                if(chToSet.contains(m_NFAG.endNode->stateNum))
+                    m_DFAEndStateSet.insert(m_DFAStateNum);
+                //更新原节点的信息
+                m_DFAStateArr[t_curState].DFAEdgeMap[ch]=m_DFAStateNum;//当前DFA节点能通过ch去到的新DFA状态
+                DFAStatesSet.insert(chToSet);
+                q.push_back(m_DFAStateArr[m_DFAStateNum++]);//节点入队后自增，DFA节点新增，寻找更多的
+            }
+            else
+            {   //若该DFA状态节点存在
+                for(int i=0;i<m_DFAStateNum;i++)
                 {
-
-                    if(tmpS==DFAStateArr[i].em_closure_NFA)
+                    if(m_DFAStateArr[i].NFANodeSet==chToSet)
                     {
-                        DFAStateArr[num].edges[DFAStateArr[num].edgeCount].input=*it;
-                        DFAStateArr[num].edges[DFAStateArr[num].edgeCount].tgtState=i;
-                        DFAStateArr[num].edgeCount++;
-
-                        DFAG.tranArr[num][it->toLatin1()-'a']=i;//更新转移矩阵
-
+                        //更新当前DFA节点状态
+                        m_DFAStateArr[t_curState].DFAEdgeMap[ch]=i;//当前DFA节点能通过ch边去到的DFA状态发生变更
                         break;
                     }
                 }
@@ -715,14 +707,6 @@ void NDFA::NFA2DFA()
         }
     }
 
-    //求出DFA的终态集合
-    for(int i=0;i<DFAStateNum;i++)//遍历该DFA的所有状态
-    {
-        if(DFAStateArr[i].isEnd==true) //若其为终态则加入到集合中
-        {
-            DFAG.endStates.insert(i);
-        }
-    }
 }
 
 /**
@@ -731,180 +715,285 @@ void NDFA::NFA2DFA()
  */
 void NDFA::DFA2mDFA()
 {
-    mDFAG.endCharSet=DFAG.endCharSet;//将DFA的终结符集合赋给mDFA
-    //qDebug()<<mDFAG.endCharSet;
+    m_mDFAStateNum=1;//未划分，状态数量为1
+    for(int i=0;i<m_DFAStateNum;i++)//遍历DFA状态集合
+    {   //若DFA状态非终态
+        if(!m_DFAStateArr[i].NFANodeSet.contains(m_NFAG.endNode->stateNum))
+        {   //暂时都划分到非终态集合
+            m_dividedSet[1].insert(m_DFAStateArr[i].stateNum);//非终态集合
+            m_mDFAStateNum=2;//设为2，终态与非终态
 
-    memset(mDFAG.tranArr,-1,sizeof(mDFAG.tranArr)); //初始化mDFA的转移矩阵
-
-    //首次划分，将终态与非终态分开
-    bool allEndFlag = true;//DFA所有状态是否全为状态的标志
-    for(int i=0;i<DFAStateNum;i++)
-    {
-        if(DFAStateArr[i].isEnd==false)//若该DFA状态非终态
-        {
-            allEndFlag=false;
-            mDFAStateNum=2;
-
-            dividedSet[1].insert(DFAStateArr[i].stateNum); //将该状态的状态号加入dividedSet[1]集合中
         }
-        else
-        {
-            dividedSet[0].insert(DFAStateArr[i].stateNum); //将该状态的状态号加入dividedSet[0]集合中
-        }
+        else m_dividedSet[0].insert(m_DFAStateArr[i].stateNum);//否则加入终态划分
     }
 
-    if(allEndFlag) //若真则所有DFA状态都为终态
+    bool divFlag=true;//表示是否有新状态划分出来，有则真，无则假
+    while(divFlag)
     {
-        mDFAStateNum=1;//第一次划分结束只有一个集合
-    }
-
-    bool newedDivFlag=true; //上一次是否产生新划分标志
-    while(newedDivFlag) //只要上一次产生新的划分就继续循环
-    {
-        int divCount=0;
-        for(int i=0;i<mDFAStateNum;i++)
+        //遍历mDFA状态
+        divFlag=false;
+        for(int i=0;i<m_mDFAStateNum;i++)
         {
-            QSet<QChar>::iterator it;
-            for(it=DFAG.endCharSet.begin();it!=DFAG.endCharSet.end();it++)
+            //遍历操作符集
+            for(const auto &opChar: m_opCharSet)
             {
-                int cacheSetNum=0;//当前状态集合个数初始化
-                stateSet tmpStSet[20];//划分状态集的 缓冲区
+                int t_divCount = 0;//暂存划分状态计数，从0开始
+                stateSet t_stateSet[ARR_TEMP_SIZE];//分出的状态
 
-                QSet<int>::iterator iter;
-                for(iter=dividedSet[i].begin();iter!=dividedSet[i].end();iter++)
+                for(const auto &t_state: m_dividedSet[i])//遍历当前划分状态集中的所有节点
                 {
-                    bool epFlag=true;//判断该集合是否存在没有该终结符对应的转换弧的状态
-                    for(int j=0;j<DFAStateArr[*iter].edgeCount;j++)//遍历该状态的所有边
+                    //若当前DFA节点能通过opChar边到达另外一个节点
+                    if(m_DFAStateArr[t_state].DFAEdgeMap.contains(opChar))
                     {
-                        if(DFAStateArr[*iter].edges[j].input==*it)
+                        //通过opChar到达的节点所属状态划分集合 号
+                        int toIdx=getStateId(m_dividedSet, m_DFAStateArr[t_state].DFAEdgeMap[opChar]);
+                        bool haveSameDiv=false;
+                        for(int j=0;j<t_divCount;j++)
                         {
-                            epFlag=false; //则标志为false
-
-                            //计算该状态转换到的状态集的标号
-                            int tranSetNum=findSetNum(mDFAStateNum,DFAStateArr[*iter].edges[j].tgtState);
-
-                            int curSetNum=0;//遍历缓冲区，查找是否存在到达这个标号的状态集
-                            while((tmpStSet[curSetNum].stateSetNum!=tranSetNum)&&(curSetNum<cacheSetNum))
+                            //若暂时分出来的状态号有相同的
+                            if(t_stateSet[j].stateSetId==toIdx)
                             {
-                                curSetNum++;
+                                haveSameDiv=true;//状态划分未变更，仅划分内状态变动
+                                t_stateSet[j].DFAStateSet.insert(t_state);//加入该状态入暂存划分状态中
+                                break;
                             }
-
-                            if(curSetNum==cacheSetNum)
-                            {
-                                //缓冲区中新建一个状态集
-                                tmpStSet[cacheSetNum].stateSetNum=tranSetNum;//将该状态集所能转换到的状态集标号为tranSetNum
-                                tmpStSet[cacheSetNum].DFAStateSet.insert(*iter);//将当前状态添加到该状态集合中
-
-                                cacheSetNum++;//缓冲区状态集计数增加
-                            }
-                            else //缓冲区中存在到达这个标号的状态集
-                            {
-                                tmpStSet[curSetNum].DFAStateSet.insert(*iter);//将当前状态集加入到该状态集中
-                            }
+                        }
+                        if(!haveSameDiv)
+                        {
+                            //若状态不在相同的划分，即出现了新的划分
+                            t_stateSet[t_divCount].stateSetId=toIdx;
+                            t_stateSet[t_divCount].DFAStateSet.insert(t_state);
+                            t_divCount++;//暂存划分计数增加
                         }
                     }
-
-                    //若该状态不存在与该终结符对应的转换弧
-                    if(epFlag)
+                    else
                     {
-                        /*寻找缓冲区中是否存在转换到标号为-1的状态集，这里规定如果不存在转换弧，则它所到达的状态集标号为-1*/
-                        int curSetNum=0;
-                        while((tmpStSet[curSetNum].stateSetNum!=-1)&&(curSetNum<cacheSetNum))
+                        //若当前DFA节点不能通过opChar边到达另外一个节点
+                        bool haveSame=false;
+                        for(int j=0;j<t_divCount;j++)//遍历所有暂存划分
                         {
-                            curSetNum++;
+                            if(t_stateSet[j].stateSetId==-1)
+                            {
+                                haveSame=true;
+                                t_stateSet[j].DFAStateSet.insert(t_state);
+                                break;
+                            }
                         }
-
-                        if(curSetNum==cacheSetNum)//若不存在这样的状态集
+                        if(!haveSame)
                         {
-                            tmpStSet[cacheSetNum].stateSetNum=-1;//将该状态集转移到状态集标号-1
-                            tmpStSet[cacheSetNum].DFAStateSet.insert(*iter);
-
-                            cacheSetNum++;//缓冲区状态集计数增加
-                        }
-                        else
-                        {
-                            tmpStSet[curSetNum].DFAStateSet.insert(*iter);//将当前状态加入到该状态集中
+                            //若状态不在相同的划分，即出现了新的划分
+                            t_stateSet[t_divCount].stateSetId=-1;//不可达的标记
+                            t_stateSet[t_divCount].DFAStateSet.insert(t_state);
+                            t_divCount++;//分出来的新状态增加
                         }
                     }
                 }
 
-                if(cacheSetNum>1)//r若缓冲区中的状态集个数大于1，集表示同一个状态集中的元素可以转换到不同的状态集，需要进行划分
+                if(t_divCount>1)//大于1即产生了新的划分
                 {
-                    divCount++; //划分计数增加
-
-                    //为每个划分创建新的DFA状态
-                    for(int j=1;j<cacheSetNum;j++)
+                    divFlag=true;
+                    for(int j=1;j<t_divCount;j++)//遍历暂存划分集合
                     {
-                        QSet<int>::iterator it;
-//                        qDebug()<<tmpStSet[j].DFAStateSet;
-                        for(it=tmpStSet[j].DFAStateSet.begin();it!=tmpStSet[j].DFAStateSet.end();it++)
+                        for(const auto &state: t_stateSet[j].DFAStateSet)
                         {
-                            //int tmp=*it;
-                            dividedSet[i]-={*it};
-                            //dividedSet[i].erase(it);//这一句直接报错非法下标，不清楚原因
-                            dividedSet[mDFAStateNum].insert(*it);
+                            //将被分出去的DFA节点序号从原来状态中去除
+                            m_dividedSet[i].remove(state);
+                            //加入新状态
+                            m_dividedSet[m_mDFAStateNum].insert(state);
                         }
-                        mDFAStateNum++;//最小化DFA状态总数增加
-                    }
-                }
-            }
-        }
-
-        //若需要划分的次数为0，则表示本次不需要进行划分
-        if(divCount==0)
-        {
-            newedDivFlag=false;
-        }
-    }
-
-    //遍历每一个划分好的状态集
-    for(int i=0;i<mDFAStateNum;i++)
-    {
-        QSet<int>::iterator itr;
-        for(itr=dividedSet[i].begin();itr!=dividedSet[i].end();itr++)//遍历集合中的每一个元素
-        {
-            //若当前状态为DFA的初态，则该最小化DFA状态亦为初态
-            if(*itr==DFAG.startState)
-            {
-                mDFAG.startState=i;
-            }
-
-            if(DFAG.endStates.contains(*itr))
-            {
-                mDFANodeArr[i].isEnd=true;
-                mDFAG.endStates.insert(i);
-            }
-
-            //遍历该DFA状态的每条弧，为最小化DFA创建弧
-            for(int j=0;j<DFAStateArr[*itr].edgeCount;j++)
-            {
-                //遍历划分好的状态集合，找出该弧转移到的状态现在属于哪个集合
-                for(int t=0;t<mDFAStateNum;t++)
-                {
-                    if(dividedSet[t].contains(DFAStateArr[*itr].edges[j].tgtState))
-                    {
-                        bool hadEdge=false;
-                        for(int l=0;l<mDFANodeArr[i].edgeCount;l++)
-                        {
-                            if((mDFANodeArr[i].edges[l].input==DFAStateArr[*itr].edges[j].input)&&(mDFANodeArr[i].edges[l].tgtState==t))
-                            {
-                                hadEdge=true;//标志为真
-                            }
-                        }
-
-                        if(!hadEdge)//若该弧不存在，则创建一条新的弧
-                        {
-                            mDFANodeArr[i].edges[mDFANodeArr[i].edgeCount].input=DFAStateArr[*itr].edges[j].input;
-                            mDFANodeArr[i].edges[mDFANodeArr[i].edgeCount].tgtState=t;//该弧转移到的状态为这个状态集合的标号
-
-                            mDFAG.tranArr[i][DFAStateArr[*itr].edges[j].input.toLatin1()-'a']=t; //更新转移矩阵
-
-                            mDFANodeArr[i].edgeCount++; //该状态的弧的计数增加
-                        }
-                        break;
+                        m_mDFAStateNum++;
                     }
                 }
             }
         }
     }
+
+    //遍历所有mDFA状态
+    for(int i=0;i<m_mDFAStateNum;i++)
+    {
+        m_mDFANodeArr[i].DFAStatesSet=m_dividedSet[i];//保存每一个暂存划分到mDFA中
+        for(const auto &state: m_dividedSet[i])//遍历每一个mDFA划分子集
+        {
+            //若为初态
+            if(state==0)
+            {
+                m_mDFAG.startState=i;
+            }
+            //若为终态
+            if(m_DFAEndStateSet.contains(state))
+            {
+                m_mDFAG.endStateSet.insert(i);//加入终态集
+            }
+
+            //遍历所有操作符
+            for(const auto &opChar: m_opCharSet)
+            {
+                //若当前状态可通过opChar边到达别的状态
+                if(m_DFAStateArr[state].DFAEdgeMap.contains(opChar))
+                {
+                    int id=getStateId(m_dividedSet,m_DFAStateArr[state].DFAEdgeMap[opChar]);
+                    //若该边不存在，插入边（完善mDFA边信息）
+                    if(!m_mDFANodeArr[i].mDFAEdgesMap.contains(opChar))
+                    {
+                        m_mDFANodeArr[i].mDFAEdgesMap[opChar]=id;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief NDFA::mDFA2Lexer
+ * @return Lexer
+ * 根据最小化DFA，生成词法分析程序C语言代码，返回代码字符串
+ */
+QString NDFA::mDFA2Lexer(QString filePath)
+{
+    QStringList keywordList=m_reg_keyword_str.split('|');
+
+    QString lexCode;
+    int m_state=m_mDFAG.startState;//最小化DFA的初态
+
+    //库函数
+    lexCode+="#include<stdio.h>\n"
+             "#include<stdlib.h>\n"
+             "#include<string.h>\n"
+             "#include<ctype.h>\n"
+            "#include<set>\n"
+             "#include<unordered_map>\n";
+    //关键字映射map
+    lexCode+="std::set<std::string> keywordSet={};\n";
+
+    //生成分析代码
+    lexCode+="void coding(FILE* input_fp,FILE* output_fp) {\n"
+             "\tchar tmp = fgetc(input_fp);\n"
+             "\tif (tmp == ' ' || tmp == '\\n' || tmp == '\\t'){\n"
+             "\t\tfprintf(output_fp, \"%c\", tmp);\n"
+             "\t\tprintf(\"%c\", tmp);\n"
+             "\t\treturn;\n"
+             "\t}\n"
+             "\tungetc(tmp, input_fp);\n"
+             "\tint state = "+QString::number(m_state)+";\n"
+             "\tbool flag = false;\n"
+             "\tbool isIdentifier = false;\n"
+            "\tbool isDigit = false;\n"
+             "\tbool isAnnotation = false;\n"
+             "\tstd::string value;\n"
+             "\twhile (!flag) {\n"
+             "\t\ttmp = fgetc(input_fp);\n"
+             "\t\tswitch (state) {\n";
+
+    for(int i=0;i<m_mDFAStateNum;i++)
+    {
+        if(m_mDFANodeArr[i].mDFAEdgesMap.size()){
+            lexCode+="\t\tcase "+QString::number(i)+": {\n";
+            lexCode+="\t\t\tswitch (tmp) {\n";
+            QList<QString> tmpList=m_mDFANodeArr[i].mDFAEdgesMap.keys();//该状态的所有边值
+            if(genLexCase(tmpList,lexCode,i,1))
+                lexCode+="\t\t\tdefault:state = "+QString::number(m_mDFANodeArr[i].mDFAEdgesMap["~"])+"; isAnnotation = true; break;\n";
+            lexCode+="\t\t\t}\n";
+            lexCode+="\t\t\tbreak;\n";
+            lexCode+="\t\t}\n";
+        }
+    }
+    lexCode+="\t\t}\n";
+    lexCode+="\t\tvalue += tmp;\n";
+
+    QList<int> stateList=m_mDFAG.endStateSet.values();//所有终态
+
+    lexCode+="\t\tif (";
+    for(int i=0;i<stateList.size();i++)
+    {
+        //要提前读一个字符判断是不是真的到终态，因为到了终态不一定是真正的终态
+        int num=stateList[i];
+        if(i)lexCode+="\t\telse if (";
+        lexCode+="state =="+QString::number(num)+") {\n";
+        lexCode+="\t\t\ttmp = fgetc(input_fp);\n";
+        lexCode+="\t\t\tswitch (tmp) {\n";
+        QList<QString> tmpList=m_mDFANodeArr[num].mDFAEdgesMap.keys();//该状态的所有边值
+        genLexCase(tmpList,lexCode,num,0);
+        lexCode+="\t\t\tdefault: {\n";
+        lexCode+="\t\t\t\tflag=true;\n";
+        if(tmpList.contains("letter"))
+            lexCode+="\t\t\t\tisIdentifier = true;\n";
+        lexCode+="\t\t\t}\n"
+                 "\t\t\t}\n"
+                 "\t\t\tungetc(tmp, input_fp);\n"
+                 "\t\t}\n";
+    }
+    lexCode+="\t}\n";
+
+    //为适配解码增加Keyword:前缀，数字Digit:前缀，ID:标识符前缀
+
+    lexCode+="\tif (keywordSet.count(value)) {\n"
+            "\t\tfprintf(output_fp, \"Keyword:%s \", value.c_str());\n"
+            "\t\tprintf(\"Keyword:%s \", value.c_str());\n"
+            "\t\treturn;\n"
+            "\t}\n"
+            "\tif (isIdentifier) {\n"
+            "\t\tfprintf(output_fp, \"ID:%s \", value.c_str());\n"
+            "\t\tprintf(\"ID:%s \", value.c_str());\n"
+            "return;\n"
+            "\t}\n"
+            "\tif (isDigit) {\n"
+            "\t\tfprintf(output_fp, \"Digit:%s \", value.c_str());\n"
+            "\t\tprintf(\"Digit:%s \", value.c_str());\n"
+            "\t\treturn;\n"
+            "\t}\n"
+            "\tif (!isAnnotation) {\n"
+            "\t\tfprintf(output_fp, \"%s \", value.c_str());\n"
+            "\t\tprintf(\"%s \", value.c_str());\n"
+            "\t}\n"
+            "};\n";
+
+    //主函数
+    QFileInfo fileInfo(filePath);
+    QString t_tmpFilePath=fileInfo.path();
+    lexCode+="int main(int argc, char* argv[]) {\n"
+             "\tFILE* input_fp = fopen(\""+filePath+"/_sample.tny\", \"r\");\n"
+             "\tif (input_fp == NULL) {\n"
+             "\t\tprintf(\"Failed to open input file\");\n"
+             "\t\treturn 1;\n"
+             "\t}\n";
+
+    lexCode+="\tFILE* output_fp = fopen(\""+t_tmpFilePath+"/output.lex"+"\", \"w\");\n"
+             "\tif (output_fp == NULL) {\n"
+             "\t\tprintf(\"Failed to open output file\");\n"
+             "\t\tfclose(input_fp);\n"
+             "\t\treturn 1;\n"
+             "\t}\n";
+
+
+    lexCode+="keywordSet = { ";
+    for(const auto &tmp : keywordList)
+    {
+        lexCode+="\""+tmp+"\",";
+    }
+    lexCode.chop(1);
+    lexCode+=" };\n";
+
+    lexCode+="\tchar c;\n"
+             "\twhile ((c=fgetc(input_fp)) != EOF) {\n"
+             "\t\tungetc(c, input_fp);\n"
+             "\t\tcoding(input_fp, output_fp);\n"
+             "\t}\n"
+             "\tfclose(input_fp);\n"
+             "\tfclose(output_fp);\n"
+             "\treturn 0;\n"
+             "}";
+
+    m_lexerCodeStr=lexCode;
+    return lexCode;
+}
+
+void NDFA::setPath(QString srcFilePath, QString tmpFilePath)
+{
+    this->m_srcFilePath=srcFilePath;//源程序文件路径
+    this->m_tmpFilePath=tmpFilePath;
+}
+
+void NDFA::setKeywordStr(QString kStr)
+{
+    this->m_reg_keyword_str=kStr;
 }
